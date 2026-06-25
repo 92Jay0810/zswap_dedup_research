@@ -1,0 +1,65 @@
+# =========================================================================
+# 1. 媒體串流伺服器
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloudsuite-media-streaming
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: server
+        image: cloudsuite/media-streaming:server
+        ports:
+        - containerPort: 80
+---
+# =========================================================================
+# 2. 伺服器服務中樞
+# =========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-server-svc
+spec:
+  selector:
+    job-name: cloudsuite-media-streaming
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+---
+# =========================================================================
+# 3. 客戶端大軍 (9 個獨立 Pod - 純淨 Benchmark 版)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloudsuite-media-client
+spec:
+  parallelism: 9
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: client
+        image: cloudsuite/media-streaming:client
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y apache2-utils dnsutils > /dev/null 2>&1
+          
+          echo "=== ⏳ 等待 Server 初始化 (15秒) ==="
+          sleep 15
+          
+          echo "=== 🚀 Starting ab Network Workload (Foreground) ==="
+          # 移到前景執行，維持 300 秒的純粹網路串流負載
+          ab -t 300 -n 5000000 -c 50 -k http://media-server-svc/video.mp4
+          
+          echo "=== 🎯 Real Load Test Finished ==="
+        resources:
+          requests:
+            memory: "400Mi"
+          limits:
+            memory: "1Gi"

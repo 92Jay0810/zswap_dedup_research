@@ -1,0 +1,88 @@
+# =========================================================================
+# 0. Python API 服務中樞
+# =========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-api-svc
+spec:
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000
+  selector:
+    app: python-farm
+---
+# =========================================================================
+# 1. 輕量級 Python API 大軍 (10 個獨立 Pod - 純淨的 Base Layer 分頁)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: python-api-workload
+spec:
+  parallelism: 15 # 啟動 10 個 Python 容器，最大化 Base Image 共享效益
+  template:
+    metadata:
+      labels:
+        app: python-farm
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: api-server
+        image: python:3.10-slim # 極度純淨、標準的官方基礎鏡像
+        command: ["/bin/sh", "-c"]
+        # 【運作邏輯】
+        # 1. 產生一個假的首頁 index.html
+        # 2. 在背景啟動 stress-ng，每個 Pod 鎖死 500MB，逼迫系統調度 Swap
+        # 3. 前景啟動內建的 Python HTTP Server 接收流量
+        args: 
+        - |
+          apt-get update && apt-get install -y stress-ng > /dev/null 2>&1
+          
+          echo '{"status": "ok", "message": "Hello from Python API Farm!"}' > index.html
+          
+          echo "=== 🚀 Starting stress-ng (500MB) in background ==="
+          stress-ng --vm 1 --vm-bytes 500M --vm-keep --timeout 400s &
+          
+          echo "=== 🐍 Starting Python API Server on port 5000 ==="
+          python3 -m http.server 5000
+        resources:
+          requests:
+            memory: "200Mi"
+          limits:
+            memory: "650Mi" # 給予 650MB 上限，完美包容 500MB 的 stress-ng 壓力
+---
+# =========================================================================
+# 2. 客戶端壓測中樞 (負責維持網路活躍度)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: python-api-load-generator
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: ab-client
+        image: debian:bullseye-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y apache2-utils dnsutils curl > /dev/null 2>&1
+          echo "=== ⏳ 等待 Python API 農場初始化 (20秒) ==="
+          sleep 20
+          
+          TARGET_IP=$(nslookup python-api-svc | awk '/^Address: / { print $2 }' | head -n 1)
+          
+          if [ -z "$TARGET_IP" ]; then
+            echo "❌ 找不到 python-api-svc，嘗試直接打 localhost..."
+            TARGET_IP="127.0.0.1"
+          fi
+          
+          echo "=== 🔥 啟動 API 併發壓測 (目標 IP: ${TARGET_IP}) ==="
+          # 持續打 300 秒，讓 Python 伺服器保持忙碌，證明被 Swap 的是活著的服務
+          ab -t 300 -n 10000000 -c 100 -k -r http://${TARGET_IP}:5000/
+          
+          echo "=== 🎯 壓測結束！==="

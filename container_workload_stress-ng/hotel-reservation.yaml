@@ -1,0 +1,106 @@
+# =========================================================================
+# 0. 前端服務中樞
+# =========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: hotel-frontend-svc
+spec:
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000
+  selector:
+    app: hotel-extreme
+---
+# =========================================================================
+# 1. 前端大軍 (12 個獨立 Pod - stress-ng 真實壓力版)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hotel-workload
+spec:
+  parallelism: 12 
+  template:
+    metadata:
+      labels:
+        app: hotel-extreme
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: frontend
+        image: deathstarbench/hotel-reservation:latest
+        command: ["/bin/sh", "-c"]
+        # 【核心修改點】
+        # 1. 安裝 stress-ng。
+        # 2. 在背景執行 stress-ng，開啟 1 個 worker，分配並鎖定 600MB 記憶體 (--vm-keep)。
+        # 3. 確保原本的 frontend 應用在前景正常啟動，負責接收 ab 的網路流量。
+        args: 
+        - |
+          apt-get update && apt-get install -y stress-ng > /dev/null 2>&1
+          
+          echo "=== 🚀 Starting stress-ng Memory Stress in background ==="
+          stress-ng --vm 1 --vm-bytes 600M --vm-keep --timeout 400s &
+          
+          echo "=== 🏨 Starting Hotel Frontend ==="
+          frontend
+        resources:
+          requests:
+            memory: "300Mi"
+          limits:
+            memory: "700Mi" 
+---
+# =========================================================================
+# 2. 資料庫與快取 (2 個 Pod)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hotel-infrastructure
+spec:
+  template:
+    metadata:
+      labels:
+        app: hotel-extreme
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: mongodb
+        image: mongo:4.4.6
+      - name: memcached
+        image: memcached:1.6.15-alpine
+        args: ["-m", "1024"]
+---
+# =========================================================================
+# 3. 壓測與全體自動撤退中樞
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: deathstar-hotel-auto-complete
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: ab-client
+        image: deathstarbench/hotel-reservation:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y apache2-utils dnsutils curl > /dev/null 2>&1
+          echo "=== ⏳ 等待前端與基礎設施初始化 (30秒) ==="
+          sleep 30
+          
+          TARGET_IP=$(nslookup hotel-frontend-svc | awk '/^Address: / { print $2 }' | head -n 1)
+          
+          if [ -z "$TARGET_IP" ]; then
+            echo "❌ 找不到 hotel-frontend-svc 的 IP，嘗試直接打 localhost..."
+            TARGET_IP="127.0.0.1"
+          fi
+          
+          echo "=== 🔥 終極壓測開始 (目標 IP: ${TARGET_IP}) ==="
+          ab -t 300 -n 20000000 -c 150 -k -r http://${TARGET_IP}:5000/
+          
+          echo "=== 🎯 壓測結束！等待 stress-ng 定時器到期後自動結束 Job... ==="

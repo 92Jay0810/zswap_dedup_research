@@ -1,0 +1,35 @@
+# =========================================================================
+# 3. 客戶端大軍 (30 個獨立 Pod - 純淨 Benchmark 版)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloudsuite-media-client
+spec:
+  parallelism: 30
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: client
+        image: cloudsuite/media-streaming:client
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y apache2-utils dnsutils > /dev/null 2>&1
+          
+          echo "=== ⏳ 等待 Server 初始化 (15秒) ==="
+          sleep 15
+          
+          echo "=== 🚀 Starting ab Network Workload (Foreground) ==="
+          # 移到前景執行，維持 300 秒的純粹網路串流負載
+          ab -t 300 -n 5000000 -c 50 -k http://media-server-svc/video.mp4
+          
+          echo "=== 🎯 Real Load Test Finished ==="
+        resources:
+          requests:
+            # 移除 stress-ng 後，純 ab 壓測不需要 80Mi
+            memory: "250Mi" 
+          limits:
+            # 嚴格限制在 80Mi，避免 30 個 Pod 成為 OOM Killer 的首要標靶
+            memory: "300Mi"

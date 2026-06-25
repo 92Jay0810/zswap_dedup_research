@@ -1,0 +1,68 @@
+# =========================================================================
+# 1. 媒體串流伺服器 (Server)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloudsuite-media-streaming
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: server
+        image: cloudsuite/media-streaming:server
+        ports:
+        - containerPort: 80
+---
+# =========================================================================
+# 2. 伺服器服務中樞 (Service)
+# =========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: media-server-svc
+spec:
+  selector:
+    job-name: cloudsuite-media-streaming
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+---
+# =========================================================================
+# 3. 客戶端大軍 (29 個獨立 Pod - 30 容器規模，專為 8G RAM 打造)
+# =========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cloudsuite-media-client
+spec:
+  parallelism: 29
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: client
+        image: cloudsuite/media-streaming:client
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y apache2-utils dnsutils stress-ng > /dev/null 2>&1
+          
+          echo "=== ⏳ 等待 Server 初始化 (15秒) ==="
+          sleep 15
+          
+          echo "=== 🚀 Starting ab Network Stress in background ==="
+          ab -t 300 -n 5000000 -c 50 -k http://media-server-svc/video.mp4 > /dev/null 2>&1 &
+          
+          echo "=== 🔥 Starting W2 stress-ng Memory Stress (30 Containers Mode) ==="
+          # 單體壓力 240M，29個Pod總計約6.96GB壓力，平穩推入 Swap
+          stress-ng --vm 1 --vm-bytes 240M --vm-keep --timeout 300s
+          
+          echo "=== 🎯 Real Load Test Finished ==="
+        resources:
+          requests:
+            memory: "80Mi"
+          limits:
+            memory: "300Mi"
