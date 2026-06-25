@@ -117,6 +117,34 @@ Tested environment:
 - swap enabled
 - root permission for eBPF tracing and `/proc/kallsyms`
 
+### VM-side Test Setup
+
+Besides the container-based experiments, this project also used a VM-side test setup to check whether duplicate pages can be observed under a simpler controlled environment.
+
+The VM test setup used:
+
+- one host machine running the zswap dedup monitor
+- two guest VMs, referred to as `vm1` and `vm2`
+- about 2 GB memory assigned to each VM
+- Python scripts in both VMs to allocate about 1500 MB of memory
+- random page content generated with `os.random` / random filling, so the two VMs would not simply contain identical zero-filled memory
+
+The host side runs the eBPF dedup monitor while the VMs generate memory pressure. During testing, `free -g` was used on the host to check remaining memory and confirm whether enough pressure was created to trigger swap activity.
+
+An additional host-side stress test was also performed with the custom `stress.c` program. A smaller test such as:
+
+```bash
+./stress 2G 200
+```
+
+did not reliably trigger swap in the tested setup, so the pressure was increased to:
+
+```bash
+./stress 2500M 200
+```
+
+The custom stress program was used because `stress-ng` itself may affect the measured duplicate-page behavior. The final `stress.c` version fills allocated pages with random content and avoids repeatedly reading page bytes for checksum calculation, because that repeated reading may keep pages active and reduce the chance that they are swapped out.
+
 ## Build the eBPF Tool
 
 ```bash
@@ -185,6 +213,8 @@ kubectl apply -f container_worklod_only/media_streaming_onlyworkload_30pods.yaml
 ## Custom Stress Program
 
 The `stress/` folder contains a small C program that allocates memory and fills pages with random content. It can be used for simpler non-container memory-pressure tests.
+
+This tool was added to reduce dependence on `stress-ng` when the experiment needs a cleaner memory-pressure source.
 
 Example:
 
