@@ -28,8 +28,12 @@ The main goal is not to modify the kernel yet, but to build a measurement pipeli
 │   └── Kubernetes workload scripts for pure application workloads
 ├── container_worklod_only_log/
 │   └── Logs collected from pure workload experiments
+├── report/
+│   └── Final project report in PDF and DOCX formats
 ├── stress/
 │   └── A small custom memory-pressure program
+├── vm/
+│   └── VM cloud-init configuration files and VM-side kernel header
 └── zswap_dup_eBPF/
     └── eBPF-based zswap duplicate-page measurement tool
 ```
@@ -72,6 +76,15 @@ The logs include:
 - estimated memory saved
 - thrashing events
 - sampled duplicate-page content types such as `ZERO`, `TEXT/ASCII`, `PTR_HEAVY`, and `BINARY`
+
+## Report
+
+The `report/` folder contains the final written report for this course project:
+
+- `zswap_dedup_research_report.pdf`: read-only version for quick review
+- `zswap_dedup_research_report.docx`: editable source document
+
+The report summarizes the research motivation, implementation details, experiment setup, measured deduplication ratios, page-content analysis, and limitations of the current eBPF-based measurement approach.
 
 ## eBPF zswap Dedup Tool
 
@@ -128,6 +141,8 @@ The VM test setup used:
 - about 2 GB memory assigned to each VM
 - Python scripts in both VMs to allocate about 1500 MB of memory
 - random page content generated with `os.random` / random filling, so the two VMs would not simply contain identical zero-filled memory
+
+The `vm/` folder contains the VM configuration files used in this setup, including `meta-data-vm1`, `meta-data-vm2`, `user-data-vm1`, `user-data-vm2`, and the VM-side `vmlinux.h` header.
 
 The host side runs the eBPF dedup monitor while the VMs generate memory pressure. During testing, `free -g` was used on the host to check remaining memory and confirm whether enough pressure was created to trigger swap activity.
 
