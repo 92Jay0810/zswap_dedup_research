@@ -1,0 +1,17 @@
+#cloud-config
+hostname: vm2
+
+users:
+  - default
+  - name: ubuntu
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSED:ALL
+    lock_passwd: false
+
+chpasswd:
+  list: |
+    ubuntu:ubuntu
+  expire: false
+
+ssh_pwauth: true
